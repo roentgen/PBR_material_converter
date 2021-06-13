@@ -125,3 +125,9 @@ def start(mat) :
     out = list(filter(lambda x: x.type == 'OUTPUT_MATERIAL' and x.is_active_output and x.target != 'OCTANE', mat.node_tree.nodes))
     [convert_start(mat, o) for o in out]
 ## start(bpy.context.active_object.active_material)
+
+def dryrun(mat):
+    print("dryrun: ")
+    out = list(filter(lambda x: x.type == 'OUTPUT_MATERIAL' and x.is_active_output and x.target != 'OCTANE', mat.node_tree.nodes))
+    [print("conv_start() for {}".format(o)) for o in out]
+    print("dryrun: finished")

@@ -1,30 +1,52 @@
 def conv_node(nodes, node) :
     print("Convert node type:{} name:{}".format(node.type, node.name))
+    loc = node.location
+    ret = None
     if node.type == 'MIX_SHADER':
-       return nodes.new(type='ShaderNodeOctMixMat')
+       ret = nodes.new(type='ShaderNodeOctMixMat')
     elif node.type == 'BSDF_TRANSPARENT':
         # for Octane, there is an opacity input on most of shaders.
         # should be replaced by Opacity of Universal Material
-        return nodes.new(type='ShaderNodeOctGlossyMat')
+        ret = nodes.new(type='ShaderNodeOctGlossyMat')
     elif node.type == 'BSDF_PRINCIPLED':
-        return nodes.new(type='ShaderNodeOctUniversalMat')
+        ret = nodes.new(type='ShaderNodeOctUniversalMat')
     elif node.type == 'MIX_RGB':
         # FIXME: respect an operation mode, Multiply, Add... or more.
         # frac could be multipy to Color2:  result = Color1 op (Color2 * Fac)
-        return nodes.new(type='ShaderNodeOctMixTex')
+        ret = nodes.new(type='ShaderNodeOctMixTex')
     elif node.type == 'HUE_SAT':
         # Octane has a good color collection node which can consolidate Hue/Sat and Bright/Contrast onto one.
-        return nodes.new(type='ShaderNodeOctColorCorrectTex')
+        ret = nodes.new(type='ShaderNodeOctColorCorrectTex')
     elif node.type == 'BRIGHTCONTRAST':
-        return nodes.new(type='ShaderNodeOctColorCorrectTex')
+        ret = nodes.new(type='ShaderNodeOctColorCorrectTex')
     elif node.type == 'TEX_IMAGE':
         # FIXME: Octane's tex nodes need to  be respective if it uses alpha or not
-        return nodes.new(type='ShaderNodeOctImageTex')
+        # name: 
+        # interpolation: LINEAR
+        # projection: FLAT
+        # extension: REPEAT
+        ret = nodes.new(type='ShaderNodeOctImageTex')
     elif node.type == 'MAPPING':
-        return nodes.new(type='ShaderNodeOct2DTransform')
+        ret = nodes.new(type='ShaderNodeOct2DTransform')
     elif node.type == 'TEX_COORD':
-        return nodes.new(type='ShaderNodeOctUVWProjection')
-    return None
+        ret = nodes.new(type='ShaderNodeOctUVWProjection')
+    elif node.type == 'VALTORGB':
+        ret = nodes.new(type='ShaderNodeOctClampTex')
+    elif node.type == 'GAMMA':
+        ret = nodes.new(type='ShaderNodeOctColorCorrectTex')
+    elif node.type == 'INVERT':
+        ret = nodes.new(type='ShaderNodeOctInvertTex')
+    elif node.type == 'NORMAL_MAP':
+        # should be through
+        ret = nodes.new(type='ShaderNodeOctAddTex')
+    elif node.type == 'COMBXYZ':
+        ret = nodes.new(type='ShaderNodeOctChannelMergerTex')
+    elif node.type == 'SEPXYZ':
+        # decomposing gonna be a group which has 3 output because Octane node only has 1 output
+        ret = nodes.new("ShaderNodeGroup")
+        ret.node_tree = bpy.data.node_groups['DecompVectorOct']
+    ret.location = loc
+    return ret
 
 def get_equiv_link_input(nc, org) :
     (node, link) = org
@@ -70,8 +92,34 @@ def convert(visit, newmat, mat, parent, inputnode, org) :
             print("===> descend to link[{}]: name:{}  : node:{} -> node:{}".format(idx, pair[0], node.name, link.from_node.name))
             convert(visit, newmat, mat, nc,  (link.from_node, oidx), (node, idx))
 
+def create_utilities() :
+    # add Decompose Vector as a group
+    g = bpy.data.node_groups.new('DecompVectorOct', 'ShaderNodeTree')
+    gi = g.nodes.new('NodeGroupInput') # assign 1 input
+    g.inputs.new('NodeSocketVector','Vec')
+    go = g.nodes.new('NodeGroupOutput') # assign 3 outputs
+    g.outputs.new('NodeSocketFloat', 'X')
+    g.outputs.new('NodeSocketFloat', 'Y')
+    g.outputs.new('NodeSocketFloat', 'Z')
+    pickr = g.nodes.new('ShaderNodeOctChannelPickerTex')
+    pickr.channel = 'OCT_CHANNEL_R'
+    pickg = g.nodes.new('ShaderNodeOctChannelPickerTex')
+    pickg.channel = 'OCT_CHANNEL_G'
+    pickb = g.nodes.new('ShaderNodeOctChannelPickerTex')
+    pickb.channel = 'OCT_CHANNEL_B'
+    g.links.new(gi.outputs['Vec'], pickr.inputs[0])
+    g.links.new(gi.outputs['Vec'], pickg.inputs[0])
+    g.links.new(gi.outputs['Vec'], pickb.inputs[0])
+    g.links.new(pickr.outputs[0], go.inputs['X'])
+    g.links.new(pickg.outputs[0], go.inputs['Y'])
+    g.links.new(pickb.outputs[0], go.inputs['Z'])
+    
 def convert_start(mat, out) :
-    convert({}, None, mat, None, (out, 0), (out, 0))
+    create_utilities()
+    name = mat.name
+    newmat = bpy.data.materials.new(name=name)
+    bpy.context.active_object.data.materials.append(newmat)
+    convert({}, newmat.node_tree, mat.node_tree, None, (out, 0), (out, 0))
 
 def start(mat) :
     out = list(filter(lambda x: x.type == 'OUTPUT_MATERIAL' and x.is_active_output and x.target != 'OCTANE', mat.node_tree.nodes))

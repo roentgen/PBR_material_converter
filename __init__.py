@@ -52,8 +52,8 @@ class MATERIAL_OT_ConvPBRToOctane(bpy.types.Operator):
     bl_label = "Convert"
 
     def execute(self, context):
-        #start(context.active_object.active_material)
-        dryrun(context.active_object.active_material)
+        material_converter.start(context.active_object.active_material)
+        #dryrun(context.active_object.active_material)
         return{'FINISHED'}
 
 classes = [PBRMaterialConverterPanel, MATERIAL_OT_ConvPBRToOctane]

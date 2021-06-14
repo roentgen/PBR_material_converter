@@ -1,10 +1,14 @@
 import bpy
+import mathutils
 
-def conv_node(nodes, node) :
+def conv_node(nodes, node, offset) :
     print("Convert node type:{} name:{}".format(node.type, node.name))
-    loc = node.location
+    loc = node.location + offset
     ret = None
-    if node.type == 'MIX_SHADER':
+    if node.type == 'OUTPUT_MATERIAL':
+       ret = nodes.new(type='ShaderNodeOutputMaterial')
+       ret.target = 'octane'
+    elif node.type == 'MIX_SHADER':
        ret = nodes.new(type='ShaderNodeOctMixMat')
        ret.inputs[0].default_value = node.inputs[0].default_value # Frac -> Amount
     elif node.type == 'BSDF_TRANSPARENT':
@@ -135,13 +139,14 @@ def get_equiv_link_input(nc, org) :
     elif node.type == 'INVERT':
         if link == 0: print("Error: ShaderNodeOctInvertTex has no factor")
         elif link == 1: return 0
+    elif node.type == 'OUTPUT_MATERIAL':
+        return link
     elif node.type == 'COMBXYZ':
         return link
     elif node.type == 'SEPXYZ':
         return link
     elif node.type == 'MAPPING':
         return link
-    
     return -1
 
 def get_equiv_link_output(nc, org) :
@@ -159,14 +164,14 @@ def connect(newmat, nc, parent, inputorg, org) :
     if  newlink_input >= 0 and newlink_output >= 0:
         newmat.links.new(nc.outputs[newlink_output], parent.inputs[newlink_input])
 
-def convert(visit, newmat, mat, parent, inputnode, org) :
+def convert(visit, newmat, mat, parent, inputnode, org, offset) :
     (node, __) = inputnode
     if node.as_pointer() in visit:
         nc = visit[node.as_pointer()]
         # what visit has key means a node gonna be not root (parent != None)
         connect(newmat, nc, parent, inputnode, org)
         return # do not descend, just link it 
-    nc = conv_node(newmat.nodes, node)
+    nc = conv_node(newmat.nodes, node, offset)
     visit[node.as_pointer()] = nc
     # link newone to parent
     if parent != None:
@@ -183,9 +188,11 @@ def convert(visit, newmat, mat, parent, inputnode, org) :
             outs = link.from_node.outputs
             oidx = outs.values().index(link.from_socket)
             print("===> descend to link[{}]: name:{}  : node:{} -> node:{}".format(idx, pair[0], node.name, link.from_node.name))
-            convert(visit, newmat, mat, nc,  (link.from_node, oidx), (node, idx))
+            convert(visit, newmat, mat, nc,  (link.from_node, oidx), (node, idx), offset)
 
 def create_utilities() :
+    if bpy.data.node_groups['DecompVectorOct'] != None:
+        return 
     # add Decompose Vector as a group
     g = bpy.data.node_groups.new('DecompVectorOct', 'ShaderNodeTree')
     gi = g.nodes.new('NodeGroupInput') # assign 1 input
@@ -207,22 +214,32 @@ def create_utilities() :
     g.links.new(pickg.outputs[0], go.inputs['Y'])
     g.links.new(pickb.outputs[0], go.inputs['Z'])
     
-def convert_start(mat, out) :
+def convert_start(mat, out, create_new) :
     create_utilities()
-    name = mat.name
-    newmat = bpy.data.materials.new(name=name)
-    newmat.use_nodes = True
-    bpy.context.active_object.data.materials.append(newmat)
-    convert({}, newmat.node_tree, mat.node_tree, None, (out, 0), (out, 0))
+    if create_new == True:
+        name = mat.name
+        newmat = bpy.data.materials.new(name=name)
+        newmat.use_nodes = True
+        # make it empty
+        for n in newmat.node_tree.nodes:
+             newmat.node_tree.nodes.remove(n)
+        bpy.context.active_object.data.materials.append(newmat)
+        offset = mathutils.Vector((0, 0))
+    else:
+        newmat = mat
+        mostlow = min(bpy.context.active_object.active_material.node_tree.nodes, key=lambda x: x.location.y)
+        # functools.reduce(lambda acc,x: max(x.location.y, acc), bpy.context.active_object.active_material.node_tree.nodes, 0)
+        offset = mathutils.Vector((0, mostlow.location.y - mostlow.height))
+    convert({}, newmat.node_tree, mat.node_tree, None, (out, 0), (out, 0), offset)
 
 def start(mat) :
     mat.use_nodes = True
-    out = list(filter(lambda x: x.type == 'OUTPUT_MATERIAL' and x.is_active_output and x.target != 'OCTANE', mat.node_tree.nodes))
-    [convert_start(mat, o) for o in out]
+    out = list(filter(lambda x: x.type == 'OUTPUT_MATERIAL' and x.is_active_output and x.target != 'octane', mat.node_tree.nodes))
+    [convert_start(mat, o, True) for o in out]
 ## start(bpy.context.active_object.active_material)
 
 def dryrun(mat):
     print("dryrun: ")
-    out = list(filter(lambda x: x.type == 'OUTPUT_MATERIAL' and x.is_active_output and x.target != 'OCTANE', mat.node_tree.nodes))
+    out = list(filter(lambda x: x.type == 'OUTPUT_MATERIAL' and x.is_active_output and x.target != 'octane', mat.node_tree.nodes))
     [print("conv_start() for {}".format(o)) for o in out]
     print("dryrun: finished")

@@ -1,7 +1,13 @@
 import bpy
 import mathutils
 
-def conv_node(nodes, node, offset) :
+class FixupEntry:
+    def __init__(self, mode, fake, real):
+        self.mode = mode
+        self.fake = fake
+        self.real = real
+
+def conv_node(nodes, node, offset, fixup) :
     print("Convert node type:{} name:{}".format(node.type, node.name))
     loc = node.location + offset
     ret = None
@@ -10,7 +16,7 @@ def conv_node(nodes, node, offset) :
        ret.target = 'octane'
     elif node.type == 'MIX_SHADER':
        ret = nodes.new(type='ShaderNodeOctMixMat')
-       ret.inputs[0].default_value = node.inputs[0].default_value # Frac -> Amount
+       ret.inputs[0].default_value = 1.0 - node.inputs[0].default_value # Frac -> Amount
     elif node.type == 'BSDF_TRANSPARENT':
         # for Octane, there is an opacity input on most of shaders.
         # should be replaced by Opacity of Universal Material
@@ -42,7 +48,7 @@ def conv_node(nodes, node, offset) :
         # Octane has a good color collection node which can consolidate Hue/Sat and Bright/Contrast onto one.
         ret = nodes.new(type='ShaderNodeOctColorCorrectTex')
         if node.inputs['Hue'].is_linked == False:
-            ret.inputs['Hue'].default_value = node.inputs['Hue'].default_value * 2
+            ret.inputs['Hue'].default_value = (node.inputs['Hue'].default_value - 0.5) * 2
         if node.inputs['Saturation'].is_linked == False:
             ret.inputs['Saturation'].default_value = node.inputs['Saturation'].default_value
         if node.inputs['Value'].is_linked == False:
@@ -56,7 +62,7 @@ def conv_node(nodes, node, offset) :
             if node.inputs['Bright'].default_value > 0:
                 ret.inputs['Exposure'].default_value = node.inputs['Bright'].default_value
             else:
-                ret.inputs['Brightness'].default_value = node.inputs['Bright'].default_value
+                ret.inputs['Brightness'].default_value = 1.0 + node.inputs['Bright'].default_value
         if node.inputs['Contrast'].is_linked == False:
             ret.inputs['Contrast'].default_value = node.inputs['Contrast'].default_value
     elif node.type == 'TEX_IMAGE':
@@ -75,8 +81,16 @@ def conv_node(nodes, node, offset) :
             ret.border_mode = 'OCT_BORDER_MODE_BLACK'
     elif node.type == 'MAPPING':
         ret = nodes.new(type='ShaderNodeOct2DTransform')
+        if node.name == 'Extreme PBR Mapping':
+            pass
     elif node.type == 'TEX_COORD':
         ret = nodes.new(type='ShaderNodeOctUVWProjection')
+        # if the blender node is a target shall be fixed up, patch the octane node onto a fake
+        for f in fixup:
+            print ("f:{}".format(f))
+            if f == node.as_pointer():
+                print ("patch to :{}".format(ret))
+                fixup[f].fake = (ret, 0)
     elif node.type == 'VALTORGB':
         ret = nodes.new(type='ShaderNodeOctClampTex')
     elif node.type == 'GAMMA':
@@ -103,12 +117,16 @@ def conv_node(nodes, node, offset) :
         print("unknown org node: type:{} name:{}".format(node.type, node.name))
     return ret
 
-def get_equiv_link_input(nc, org) :
+def get_equiv_link_input(nc, org, fixup) :
     (node, link) = org
     print("lookup for original INPUT link:[{}] type:{} name:{} of {}".format(link, node.inputs[link].type, node.inputs[link].name, node.name))
     if node.type == 'TEX_IMAGE':
         # FIXME: need to branch Projection(5)/Transform(4)
-        return 5
+        fr = node.inputs[0].links[0].from_node
+        if fr.type == 'MAPPING' and fr.inputs['Vector'].is_linked:
+            fr = fr.inputs['Vector'].links[0].from_node
+        fixup[node.as_pointer()] = FixupEntry('output_replace', (fr, 0),  (nc, 5) ) ## *maybe_future*.outputs[0] -> nc.inputs[5] for node
+        return 4
     elif node.type == 'MIX_SHADER' and link < 3:
         return link
     elif node.type == 'BSDF_PRINCIPLED':
@@ -146,10 +164,12 @@ def get_equiv_link_input(nc, org) :
     elif node.type == 'SEPXYZ':
         return link
     elif node.type == 'MAPPING':
+        if link == 0:
+            return -1 # type-mismatched. need fixup
         return link
     return -1
 
-def get_equiv_link_output(nc, org) :
+def get_equiv_link_output(nc, org, fixup) :
     (node, link) = org
     print("lookup for original OUTPUT link:[{}] type:{} name:{} of {}".format(link, node.outputs[link].type, node.outputs[link].name, node.name))
     # just returns 0 mostly. perticular node has multi-outputs eg decomposing a vector
@@ -158,24 +178,24 @@ def get_equiv_link_output(nc, org) :
     return 0
 
 ## connect link new one's output to parent's input 
-def connect(newmat, nc, parent, inputorg, org) :
-    newlink_input = get_equiv_link_input(parent, org)
-    newlink_output = get_equiv_link_output(nc, inputorg)
+def connect(newmat, nc, parent, inputorg, org, fixup) :
+    newlink_input = get_equiv_link_input(parent, org, fixup)
+    newlink_output = get_equiv_link_output(nc, inputorg, fixup)
     if  newlink_input >= 0 and newlink_output >= 0:
         newmat.links.new(nc.outputs[newlink_output], parent.inputs[newlink_input])
 
-def convert(visit, newmat, mat, parent, inputnode, org, offset) :
+def convert(visit, fixup, newmat, mat, parent, inputnode, org, offset) :
     (node, __) = inputnode
     if node.as_pointer() in visit:
         nc = visit[node.as_pointer()]
         # what visit has key means a node gonna be not root (parent != None)
-        connect(newmat, nc, parent, inputnode, org)
+        connect(newmat, nc, parent, inputnode, org, fixup)
         return # do not descend, just link it 
-    nc = conv_node(newmat.nodes, node, offset)
+    nc = conv_node(newmat.nodes, node, offset, fixup)
     visit[node.as_pointer()] = nc
     # link newone to parent
     if parent != None:
-         connect(newmat, nc, parent,  inputnode, org)
+         connect(newmat, nc, parent,  inputnode, org, fixup)
     items = node.inputs.items()
     # descends DAG
     for pair in items:
@@ -188,7 +208,7 @@ def convert(visit, newmat, mat, parent, inputnode, org, offset) :
             outs = link.from_node.outputs
             oidx = outs.values().index(link.from_socket)
             print("===> descend to link[{}]: name:{}  : node:{} -> node:{}".format(idx, pair[0], node.name, link.from_node.name))
-            convert(visit, newmat, mat, nc,  (link.from_node, oidx), (node, idx), offset)
+            convert(visit, fixup, newmat, mat, nc,  (link.from_node, oidx), (node, idx), offset)
 
 def create_utilities() :
     if bpy.data.node_groups['DecompVectorOct'] != None:
@@ -230,7 +250,17 @@ def convert_start(mat, out, create_new) :
         mostlow = min(bpy.context.active_object.active_material.node_tree.nodes, key=lambda x: x.location.y)
         # functools.reduce(lambda acc,x: max(x.location.y, acc), bpy.context.active_object.active_material.node_tree.nodes, 0)
         offset = mathutils.Vector((0, mostlow.location.y - mostlow.height))
-    convert({}, newmat.node_tree, mat.node_tree, None, (out, 0), (out, 0), offset)
+    fixup = {}
+    visit = {}
+    convert(visit, fixup, newmat.node_tree, mat.node_tree, None, (out, 0), (out, 0), offset)
+    # fixup
+    fu = fixup.keys() & {x.as_pointer() for x in mat.node_tree.nodes.values()}
+    print("fixup: {}".format(fu))
+    for f in fu:
+        cur = fixup[f]
+        onode = visit[cur.fake[0].as_pointer()]
+        print("Fixup: mode:{} {}({})=>{}".format(cur.mode, onode, cur.fake, cur.real))
+        newmat.node_tree.links.new(onode.outputs[cur.fake[1]], cur.real[0].inputs[cur.real[1]])
 
 def start(mat) :
     mat.use_nodes = True

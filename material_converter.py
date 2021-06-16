@@ -41,7 +41,8 @@ def conv_node(newmat, node, offset, fixup) :
         # Add: frac could be multiply to Color2:  result = Color1 + (Color2 * Fac)
         # Mult: frac could effect to Color1 and Color2:  result = Color1 * (1-Fac) + (Color2 * Fac)
         if node.blend_type == 'MULTIPLY':
-            ret = nodes.new(type='ShaderNodeOctMixTex')
+            ret = nodes.new(type='ShaderNodeOctOSLTex')
+            ret.script = bpy.data.texts['_PBR_material_converter_mixrgb_mult']
         else:
             ret = nodes.new(type='ShaderNodeOctMixTex')
         if node.inputs['Fac'].is_linked == False:
@@ -218,29 +219,37 @@ def convert(visit, fixup, newmat, mat, parent, inputnode, org, offset) :
             convert(visit, fixup, newmat, mat, nc,  (link.from_node, oidx), (node, idx), offset)
 
 def create_utilities() :
-    if bpy.data.node_groups.find('DecompVectorOct') == True:
-        return 
-    # add Decompose Vector as a group
-    g = bpy.data.node_groups.new('DecompVectorOct', 'ShaderNodeTree')
-    gi = g.nodes.new('NodeGroupInput') # assign 1 input
-    g.inputs.new('NodeSocketVector','Vec')
-    go = g.nodes.new('NodeGroupOutput') # assign 3 outputs
-    g.outputs.new('NodeSocketFloat', 'X')
-    g.outputs.new('NodeSocketFloat', 'Y')
-    g.outputs.new('NodeSocketFloat', 'Z')
-    pickr = g.nodes.new('ShaderNodeOctChannelPickerTex')
-    pickr.channel = 'OCT_CHANNEL_R'
-    pickg = g.nodes.new('ShaderNodeOctChannelPickerTex')
-    pickg.channel = 'OCT_CHANNEL_G'
-    pickb = g.nodes.new('ShaderNodeOctChannelPickerTex')
-    pickb.channel = 'OCT_CHANNEL_B'
-    g.links.new(gi.outputs['Vec'], pickr.inputs[0])
-    g.links.new(gi.outputs['Vec'], pickg.inputs[0])
-    g.links.new(gi.outputs['Vec'], pickb.inputs[0])
-    g.links.new(pickr.outputs[0], go.inputs['X'])
-    g.links.new(pickg.outputs[0], go.inputs['Y'])
-    g.links.new(pickb.outputs[0], go.inputs['Z'])
-    
+    has_mixrgb_mult = '_PBR_material_converter_mixrgb_mult' in bpy.data.texts.keys()
+    if has_mixrgb_mult == False:
+        print("Create _PBR_material_converter_mixrgb_mult")
+        # 'shader add(float fac=0, color Cin = 1, color Cin2 = 1, output color Cout = 1) {\n    Cout = Cin * (1 - fac) + Cin2 * fac;\n}\n'
+        t = bpy.data.texts.new('_PBR_material_converter_mixrgb_mult')
+        t.from_string('shader add(float Amount=0, color Texture1 = 1, color Texture2 = 1, output color Cout = 1) {\n    Cout = Texture1 * (1 - Amount) + Texture1 * Texture2 * Amount;\n}\n')
+    else:
+        print("found _PBR_material_converter_mixrgb_mult")
+        
+    if bpy.data.node_groups.find('DecompVectorOct') == False:
+        # add Decompose Vector as a group
+        g = bpy.data.node_groups.new('DecompVectorOct', 'ShaderNodeTree')
+        gi = g.nodes.new('NodeGroupInput') # assign 1 input
+        g.inputs.new('NodeSocketVector','Vec')
+        go = g.nodes.new('NodeGroupOutput') # assign 3 outputs
+        g.outputs.new('NodeSocketFloat', 'X')
+        g.outputs.new('NodeSocketFloat', 'Y')
+        g.outputs.new('NodeSocketFloat', 'Z')
+        pickr = g.nodes.new('ShaderNodeOctChannelPickerTex')
+        pickr.channel = 'OCT_CHANNEL_R'
+        pickg = g.nodes.new('ShaderNodeOctChannelPickerTex')
+        pickg.channel = 'OCT_CHANNEL_G'
+        pickb = g.nodes.new('ShaderNodeOctChannelPickerTex')
+        pickb.channel = 'OCT_CHANNEL_B'
+        g.links.new(gi.outputs['Vec'], pickr.inputs[0])
+        g.links.new(gi.outputs['Vec'], pickg.inputs[0])
+        g.links.new(gi.outputs['Vec'], pickb.inputs[0])
+        g.links.new(pickr.outputs[0], go.inputs['X'])
+        g.links.new(pickg.outputs[0], go.inputs['Y'])
+        g.links.new(pickb.outputs[0], go.inputs['Z'])
+
 def convert_start(mat, out, create_new) :
     create_utilities()
     if create_new == True:

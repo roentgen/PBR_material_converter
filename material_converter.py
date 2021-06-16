@@ -7,7 +7,8 @@ class FixupEntry:
         self.fake = fake
         self.real = real
 
-def conv_node(nodes, node, offset, fixup) :
+def conv_node(newmat, node, offset, fixup) :
+    nodes = newmat.nodes
     print("Convert node type:{} name:{}".format(node.type, node.name))
     loc = node.location + offset
     ret = None
@@ -37,13 +38,14 @@ def conv_node(nodes, node, offset, fixup) :
             ret.inputs['Rotation'].default_value = node.inputs['Anisotropic Rotation'].default_value
     elif node.type == 'MIX_RGB':
         # FIXME: respect an operation mode, Multiply, Add... or more.
-        # frac could be multiply to Color2:  result = Color1 op (Color2 * Fac)
+        # Add: frac could be multiply to Color2:  result = Color1 + (Color2 * Fac)
+        # Mult: frac could effect to Color1 and Color2:  result = Color1 * (1-Fac) + (Color2 * Fac)
         if node.blend_type == 'MULTIPLY':
-            ret = nodes.new(type='ShaderNodeOctMultiplyTex')
+            ret = nodes.new(type='ShaderNodeOctMixTex')
         else:
             ret = nodes.new(type='ShaderNodeOctMixTex')
-            if node.inputs['Fac'].is_linked == False:
-                ret.inputs['Amount'].default_value = node.inputs['Fac'].default_value
+        if node.inputs['Fac'].is_linked == False:
+            ret.inputs['Amount'].default_value = node.inputs['Fac'].default_value
     elif node.type == 'HUE_SAT':
         # Octane has a good color collection node which can consolidate Hue/Sat and Bright/Contrast onto one.
         ret = nodes.new(type='ShaderNodeOctColorCorrectTex')
@@ -60,7 +62,11 @@ def conv_node(nodes, node, offset, fixup) :
         if node.inputs['Bright'].is_linked == False:
             # Octane's Brightness is default 1.0 and will not get it lighter
             if node.inputs['Bright'].default_value > 0:
-                ret.inputs['Exposure'].default_value = node.inputs['Bright'].default_value
+                # FIXME: not equivalent. Blender's Bright is additive op but Octane's Exposure is multiplier
+                supply = nodes.new(type='ShaderNodeOctAddTex')
+                supply.location = loc + mathutils.Vector((-ret.width/2, 0))
+                supply.inputs['Texture2'].default_value = node.inputs['Bright'].default_value
+                fixup[node.as_pointer()] = FixupEntry('psude_node', (supply, 0), (ret, 0))
             else:
                 ret.inputs['Brightness'].default_value = 1.0 + node.inputs['Bright'].default_value
         if node.inputs['Contrast'].is_linked == False:
@@ -92,7 +98,7 @@ def conv_node(nodes, node, offset, fixup) :
                 print ("patch to :{}".format(ret))
                 fixup[f].fake = (ret, 0)
     elif node.type == 'VALTORGB':
-        ret = nodes.new(type='ShaderNodeOctClampTex')
+        ret = nodes.new(type='ShaderNodeOctGradientTex')
     elif node.type == 'GAMMA':
         ret = nodes.new(type='ShaderNodeOctColorCorrectTex')
         if node.inputs['Gamma'].is_linked == False:
@@ -105,6 +111,7 @@ def conv_node(nodes, node, offset, fixup) :
     elif node.type == 'NORMAL_MAP':
         # should be through
         ret = nodes.new(type='ShaderNodeOctAddTex')
+        fixup[node.as_pointer()] = FixupEntry('skip', (ret, 1), (ret, 0))
     elif node.type == 'COMBXYZ':
         ret = nodes.new(type='ShaderNodeOctChannelMergerTex')
     elif node.type == 'SEPXYZ':
@@ -136,8 +143,6 @@ def get_equiv_link_input(nc, org, fixup) :
         elif link == 7: return 4 # roughness
         elif link == 20: return 29 # normal
     elif node.type == 'MIX_RGB':
-        if node.blend_type == 'MULTIPLY':
-            return link - 1
         return link
     elif node.type == 'VALTORGB':
         return link
@@ -167,6 +172,8 @@ def get_equiv_link_input(nc, org, fixup) :
         if link == 0:
             return -1 # type-mismatched. need fixup
         return link
+    elif node.type == 'NORMAL_MAP':
+        return link 
     return -1
 
 def get_equiv_link_output(nc, org, fixup) :
@@ -191,7 +198,7 @@ def convert(visit, fixup, newmat, mat, parent, inputnode, org, offset) :
         # what visit has key means a node gonna be not root (parent != None)
         connect(newmat, nc, parent, inputnode, org, fixup)
         return # do not descend, just link it 
-    nc = conv_node(newmat.nodes, node, offset, fixup)
+    nc = conv_node(newmat, node, offset, fixup)
     visit[node.as_pointer()] = nc
     # link newone to parent
     if parent != None:
@@ -211,7 +218,7 @@ def convert(visit, fixup, newmat, mat, parent, inputnode, org, offset) :
             convert(visit, fixup, newmat, mat, nc,  (link.from_node, oidx), (node, idx), offset)
 
 def create_utilities() :
-    if bpy.data.node_groups['DecompVectorOct'] != None:
+    if bpy.data.node_groups.find('DecompVectorOct') == True:
         return 
     # add Decompose Vector as a group
     g = bpy.data.node_groups.new('DecompVectorOct', 'ShaderNodeTree')
@@ -258,9 +265,22 @@ def convert_start(mat, out, create_new) :
     print("fixup: {}".format(fu))
     for f in fu:
         cur = fixup[f]
-        onode = visit[cur.fake[0].as_pointer()]
-        print("Fixup: mode:{} {}({})=>{}".format(cur.mode, onode, cur.fake, cur.real))
-        newmat.node_tree.links.new(onode.outputs[cur.fake[1]], cur.real[0].inputs[cur.real[1]])
+        if cur.mode == 'output_replace':
+            onode = visit[cur.fake[0].as_pointer()]
+            print("Fixup: mode:{} {}({})=>{}".format(cur.mode, onode, cur.fake, cur.real))
+            newmat.node_tree.links.new(onode.outputs[cur.fake[1]], cur.real[0].inputs[cur.real[1]])
+        elif cur.mode == 'psude_node':
+            print("Fixup: mode:{} {}=>{}".format(cur.mode, cur.fake, cur.real))
+            inp = cur.real[0].inputs[cur.real[1]].links[0].from_node
+            newmat.node_tree.links.new(cur.fake[0].outputs[0], cur.real[0].inputs[cur.real[1]])
+            newmat.node_tree.links.new(inp.outputs[0], cur.fake[0].inputs[cur.fake[1]])
+        elif cur.mode == 'skip':
+            print("Fixup: mode:{} {}=> none".format(cur.mode, cur.fake))
+            inlink = cur.fake[0].inputs[cur.fake[1]].links
+            out = cur.fake[0].outputs[0].links[0]
+            for i in inlink:
+                newmat.node_tree.links.new(i.from_socket, out.to_socket)
+            newmat.node_tree.nodes.remove(cur.fake[0])
 
 def start(mat) :
     mat.use_nodes = True

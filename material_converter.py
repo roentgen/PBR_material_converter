@@ -88,18 +88,21 @@ def conv_node(newmat, node, offset, fixup) :
         elif node.extension == 'CLIP':
             ret.border_mode = 'OCT_BORDER_MODE_BLACK'
         # tweak color [optional for Extreme PBR]
-        # track back to Material
-        ascend = node.outputs[0].links[0]
-        while ascend.is_valid and ascend.to_node.type != 'BSDF_PRINCIPLED':
-            ascend = ascend.to_node.outputs[0].links[0]
-        if ascend.to_node.type == 'BSDF_PRINCIPLED':
-            if ascend.to_socket.name == 'Base Color':
-                # this node is TEX_IMAGE which's used as diffuse.
-                # modify optional gamma so that a color gets closer to EEVEE's result
-                # but I don't know a reason of the value, 3.9-4.2
-                ret.inputs['Gamma'].default_value = 3.9
-            elif ascend.to_socket.name == 'Metallic':
-                ret.inputs['Power'].default_value = 0.9
+        if bpy.context.scene['pbr_oct_cvt_setting']['gamma_revice'] == 1:
+            # track back to Material
+            ascend = node.outputs[0].links[0]
+            while ascend.is_valid and ascend.to_node.type != 'BSDF_PRINCIPLED' and ascend.to_node.name != 'Occlusion AO':
+                ascend = ascend.to_node.outputs[0].links[0]
+            if ascend.to_node.type == 'BSDF_PRINCIPLED':
+                if ascend.to_socket.name == 'Base Color':
+                    # this node is TEX_IMAGE which's used as diffuse.
+                    # modify optional gamma so that a color gets closer to EEVEE's result
+                    # but I don't know a reason of the value, 3.9-4.2
+                    ret.inputs['Gamma'].default_value = 3.9
+                elif ascend.to_socket.name == 'Metallic':
+                    ret.inputs['Power'].default_value = 0.9
+            elif ascend.to_node.name == 'Occlusion AO':
+                pass # nothing to do for AO-texture
     elif node.type == 'MAPPING':
         ret = nodes.new(type='ShaderNodeOct2DTransform')
         if node.name == 'Extreme PBR Mapping':
@@ -235,9 +238,8 @@ def convert(visit, fixup, newmat, mat, parent, inputnode, org, offset) :
 def create_utilities() :
     if bpy.data.texts.find('_PBR_material_converter_mixrgb_mult') == -1:
         print("Create _PBR_material_converter_mixrgb_mult")
-        # 'shader add(float fac=0, color Cin = 1, color Cin2 = 1, output color Cout = 1) {\n    Cout = Cin * (1 - fac) + Cin2 * fac;\n}\n'
         t = bpy.data.texts.new('_PBR_material_converter_mixrgb_mult')
-        t.from_string('shader add(float Amount=0, color Texture1 = 1, color Texture2 = 1, output color Cout = 1) {\n    Cout = Texture1 * (1 - Amount) + Texture1 * Texture2 * Amount;\n}\n')
+        t.from_string('/*this literal or shader program is under MIT License */\nshader add(float Amount=0, color Texture1 = 1, color Texture2 = 1, output color Cout = 1) {\n    Cout = Texture1 * (1 - Amount) + Texture1 * Texture2 * Amount;\n}\n')
     else:
         print("found _PBR_material_converter_mixrgb_mult")
         
@@ -278,7 +280,7 @@ def convert_start(mat, out, create_new) :
         newmat = mat
         mostlow = min(bpy.context.active_object.active_material.node_tree.nodes, key=lambda x: x.location.y)
         # functools.reduce(lambda acc,x: max(x.location.y, acc), bpy.context.active_object.active_material.node_tree.nodes, 0)
-        offset = mathutils.Vector((0, mostlow.location.y - mostlow.height))
+        offset = mathutils.Vector((0, mostlow.location.y - mostlow.height - 200))
     fixup = {}
     visit = {}
     convert(visit, fixup, newmat.node_tree, mat.node_tree, None, (out, 0), (out, 0), offset)
@@ -305,9 +307,15 @@ def convert_start(mat, out, create_new) :
             newmat.node_tree.nodes.remove(cur.fake[0])
 
 def start(mat) :
+    print("Configuration:")
+    conf = bpy.context.scene['pbr_oct_cvt_setting']
+    print("create_new_material: {}".format(conf['create_new_material']))
+    print("only_active_material: {}".format(conf['only_active_material']))
+    print("gamma_revice: {}".format(conf['gamma_revice']))
+    create_new = False if conf['create_new_material'] == 0 else True
     mat.use_nodes = True
     out = list(filter(lambda x: x.type == 'OUTPUT_MATERIAL' and x.is_active_output and x.target != 'octane', mat.node_tree.nodes))
-    [convert_start(mat, o, True) for o in out]
+    [convert_start(mat, o, create_new) for o in out]
 ## start(bpy.context.active_object.active_material)
 
 def dryrun(mat):

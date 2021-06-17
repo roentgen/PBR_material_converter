@@ -40,14 +40,16 @@ class PBRMaterialConverterPanel(bpy.types.Panel):
     def draw(self, context):
         layout = self.layout
         scene = context.scene
-        layout.label(text=" Option:")
+        layout.label(text="Option:")
         row = layout.row()
         layout.label(text="Conversion:")
         row = layout.row()
-        row.scale_y = 3.0
+        row.scale_y = 2.0
         row.operator("pbr_to_octane.conv")
+        row.enabled = bpy.context.scene.render.engine == 'octane'
 
 class MATERIAL_OT_ConvPBRToOctane(bpy.types.Operator):
+    """Do Conversion: Need Octane Renderer's Enabled"""
     bl_idname = "pbr_to_octane.conv"
     bl_label = "Convert"
 

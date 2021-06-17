@@ -219,8 +219,7 @@ def convert(visit, fixup, newmat, mat, parent, inputnode, org, offset) :
             convert(visit, fixup, newmat, mat, nc,  (link.from_node, oidx), (node, idx), offset)
 
 def create_utilities() :
-    has_mixrgb_mult = '_PBR_material_converter_mixrgb_mult' in bpy.data.texts.keys()
-    if has_mixrgb_mult == False:
+    if bpy.data.texts.find('_PBR_material_converter_mixrgb_mult') == -1:
         print("Create _PBR_material_converter_mixrgb_mult")
         # 'shader add(float fac=0, color Cin = 1, color Cin2 = 1, output color Cout = 1) {\n    Cout = Cin * (1 - fac) + Cin2 * fac;\n}\n'
         t = bpy.data.texts.new('_PBR_material_converter_mixrgb_mult')
@@ -228,7 +227,7 @@ def create_utilities() :
     else:
         print("found _PBR_material_converter_mixrgb_mult")
         
-    if bpy.data.node_groups.find('DecompVectorOct') == False:
+    if bpy.data.node_groups.find('DecompVectorOct') == -1:
         # add Decompose Vector as a group
         g = bpy.data.node_groups.new('DecompVectorOct', 'ShaderNodeTree')
         gi = g.nodes.new('NodeGroupInput') # assign 1 input

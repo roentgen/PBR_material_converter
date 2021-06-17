@@ -25,7 +25,8 @@ def conv_node(newmat, node, offset, fixup) :
     elif node.type == 'BSDF_PRINCIPLED':
         ret = nodes.new(type='ShaderNodeOctUniversalMat')
         ret.transmission_type = 'OCT_BXDF_TRANSMISSION_TYPE_DIFFUSE'
-        ret.brdf_model = 'OCTANE_BRDF_GGX'
+        # Octan's GGX implimentation looks that's not good at an interpolation of normals
+        # ret.brdf_model = 'OCTANE_BRDF_GGX'
         if node.inputs['Specular'].is_linked == False:
             ret.inputs['Specular'].default_value = node.inputs['Specular'].default_value
         if node.inputs['Metallic'].is_linked == False:
@@ -86,6 +87,19 @@ def conv_node(newmat, node, offset, fixup) :
             ret.border_mode = 'OCT_BORDER_MODE_CLAMP' 
         elif node.extension == 'CLIP':
             ret.border_mode = 'OCT_BORDER_MODE_BLACK'
+        # tweak color [optional for Extreme PBR]
+        # track back to Material
+        ascend = node.outputs[0].links[0]
+        while ascend.is_valid and ascend.to_node.type != 'BSDF_PRINCIPLED':
+            ascend = ascend.to_node.outputs[0].links[0]
+        if ascend.to_node.type == 'BSDF_PRINCIPLED':
+            if ascend.to_socket.name == 'Base Color':
+                # this node is TEX_IMAGE which's used as diffuse.
+                # modify optional gamma so that a color gets closer to EEVEE's result
+                # but I don't know a reason of the value, 3.9-4.2
+                ret.inputs['Gamma'].default_value = 3.9
+            elif ascend.to_socket.name == 'Metallic':
+                ret.inputs['Power'].default_value = 0.9
     elif node.type == 'MAPPING':
         ret = nodes.new(type='ShaderNodeOct2DTransform')
         if node.name == 'Extreme PBR Mapping':

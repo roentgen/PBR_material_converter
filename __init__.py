@@ -3,7 +3,7 @@ from bpy.types import Operator, Panel, PropertyGroup
 bl_info = {
     "name" : "PBR Material Converter",
     "author" : "roentgen",
-    "version" : (0, 1),
+    "version" : (0, 2),
     "blender" : (2, 91, 0),
     "location" : "Material > Conversion",
     "description" : "",
@@ -25,7 +25,7 @@ import bpy
 
 class Props(bpy.types.PropertyGroup):
     only_active_material : bpy.props.BoolProperty(
-        name="Only Active Mesh",
+        name="Only Active Material",
         description="convert only an active material, or all materials of the object if unchecked",
         default=True)
     create_new_material : bpy.props.BoolProperty(
@@ -37,10 +37,10 @@ class Props(bpy.types.PropertyGroup):
         description="Add a bias to gamma/power on textures so that it gets the result closer to EEVEE of",
         default=True)
 
-class PBRMaterialConverterPanel(bpy.types.Panel):
+class PBRMATERIALCONVERTER_PT_Panel(bpy.types.Panel):
     """Main Panel of Materal Conversion: ExtremePBR to Octane"""
     bl_label = "Conversion ExtPBR to Octane"
-    bl_idname = "pbr_to_octane.panel"
+    bl_idname = "PBRMATERIALCONVERTER_PT_Panel"
     bl_space_type = 'PROPERTIES'
     bl_region_type = 'WINDOW'
     bl_context = "material"
@@ -48,8 +48,7 @@ class PBRMaterialConverterPanel(bpy.types.Panel):
 
     @classmethod
     def poll(self, context):
-        return True
-        #return context.active_object != None and context.active_object.active_material != None
+        return context.active_object != None and context.active_object.active_material != None
 
     def draw(self, context):
         layout = self.layout
@@ -72,7 +71,7 @@ class MATERIAL_OT_ConvPBRToOctane(bpy.types.Operator):
     bl_label = "Convert"
 
     def execute(self, context):
-        if bpy.context.scene['pbr_oct_cvt_setting']['only_active_material'] == 1:
+        if bpy.context.scene.pbr_oct_cvt_setting.only_active_material == True:
             material_converter.start(context.active_object.active_material)
         else:
             for m in bpy.context.active_object.material_slots:
@@ -80,7 +79,7 @@ class MATERIAL_OT_ConvPBRToOctane(bpy.types.Operator):
         #dryrun(context.active_object.active_material)
         return{'FINISHED'}
 
-classes = [Props, PBRMaterialConverterPanel, MATERIAL_OT_ConvPBRToOctane]
+classes = [Props, PBRMATERIALCONVERTER_PT_Panel, MATERIAL_OT_ConvPBRToOctane]
 
 def register():
     [bpy.utils.register_class(c) for c in classes]

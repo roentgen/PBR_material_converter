@@ -3,7 +3,7 @@ from bpy.types import Operator, Panel, PropertyGroup
 bl_info = {
     "name" : "PBR Material Converter",
     "author" : "roentgen",
-    "version" : (0, 1),
+    "version" : (0, 2),
     "blender" : (2, 91, 0),
     "location" : "Material > Conversion",
     "description" : "",
@@ -48,8 +48,7 @@ class PBRMATERIALCONVERTER_PT_Panel(bpy.types.Panel):
 
     @classmethod
     def poll(self, context):
-        return True
-        #return context.active_object != None and context.active_object.active_material != None
+        return context.active_object != None and context.active_object.active_material != None
 
     def draw(self, context):
         layout = self.layout
@@ -72,7 +71,7 @@ class MATERIAL_OT_ConvPBRToOctane(bpy.types.Operator):
     bl_label = "Convert"
 
     def execute(self, context):
-        if bpy.context.scene['pbr_oct_cvt_setting']['only_active_material'] == 1:
+        if bpy.context.scene.pbr_oct_cvt_setting.only_active_material == True:
             material_converter.start(context.active_object.active_material)
         else:
             for m in bpy.context.active_object.material_slots:

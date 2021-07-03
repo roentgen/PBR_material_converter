@@ -88,7 +88,7 @@ def conv_node(newmat, node, offset, fixup) :
         elif node.extension == 'CLIP':
             ret.border_mode = 'OCT_BORDER_MODE_BLACK'
         # tweak color [optional for Extreme PBR]
-        if bpy.context.scene['pbr_oct_cvt_setting']['gamma_revice'] == 1:
+        if bpy.context.scene.pbr_oct_cvt_setting.gamma_revice:
             # track back to Material
             ascend = node.outputs[0].links[0]
             while ascend.is_valid and ascend.to_node.type != 'BSDF_PRINCIPLED' and ascend.to_node.name != 'Occlusion AO':
@@ -308,11 +308,11 @@ def convert_start(mat, out, create_new) :
 
 def start(mat) :
     print("Configuration:")
-    conf = bpy.context.scene['pbr_oct_cvt_setting']
-    print("create_new_material: {}".format(conf['create_new_material']))
-    print("only_active_material: {}".format(conf['only_active_material']))
-    print("gamma_revice: {}".format(conf['gamma_revice']))
-    create_new = False if conf['create_new_material'] == 0 else True
+    conf = bpy.context.scene.pbr_oct_cvt_setting
+    print("only_active_material: {}".format(conf.only_active_material))
+    print("create_new_material: {}".format(conf.create_new_material))
+    print("gamma_revice: {}".format(conf.gamma_revice))
+    create_new = conf.create_new_material
     mat.use_nodes = True
     out = list(filter(lambda x: x.type == 'OUTPUT_MATERIAL' and x.is_active_output and x.target != 'octane', mat.node_tree.nodes))
     [convert_start(mat, o, create_new) for o in out]

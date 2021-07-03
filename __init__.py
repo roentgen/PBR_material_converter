@@ -37,10 +37,10 @@ class Props(bpy.types.PropertyGroup):
         description="Add a bias to gamma/power on textures so that it gets the result closer to EEVEE of",
         default=True)
 
-class PBRMaterialConverterPanel(bpy.types.Panel):
+class PBRMATERIALCONVERTER_PT_Panel(bpy.types.Panel):
     """Main Panel of Materal Conversion: ExtremePBR to Octane"""
     bl_label = "Conversion ExtPBR to Octane"
-    bl_idname = "pbr_to_octane.panel"
+    bl_idname = "PBRMATERIALCONVERTER_PT_Panel"
     bl_space_type = 'PROPERTIES'
     bl_region_type = 'WINDOW'
     bl_context = "material"
@@ -80,7 +80,7 @@ class MATERIAL_OT_ConvPBRToOctane(bpy.types.Operator):
         #dryrun(context.active_object.active_material)
         return{'FINISHED'}
 
-classes = [Props, PBRMaterialConverterPanel, MATERIAL_OT_ConvPBRToOctane]
+classes = [Props, PBRMATERIALCONVERTER_PT_Panel, MATERIAL_OT_ConvPBRToOctane]
 
 def register():
     [bpy.utils.register_class(c) for c in classes]

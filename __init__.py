@@ -25,7 +25,7 @@ import bpy
 
 class Props(bpy.types.PropertyGroup):
     only_active_material : bpy.props.BoolProperty(
-        name="Only Active Mesh",
+        name="Only Active Material",
         description="convert only an active material, or all materials of the object if unchecked",
         default=True)
     create_new_material : bpy.props.BoolProperty(
